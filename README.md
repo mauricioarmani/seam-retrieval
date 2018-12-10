@@ -25,9 +25,7 @@ wget http://lsa.pucrs.br/jonatas/seam-data/resnet152_precomp.tar.gz
 wget http://lsa.pucrs.br/jonatas/seam-data/vocab.tar.gz
 ```
 
-We refer to the path of extracted files for `*_precomp.tar.gz` as `$DATA_PATH` and 
-files for `models.tar.gz` as `$RUN_PATH`. Extract `vocab.tar.gz` to `./vocab` 
-directory.
+Extract `models.tar.gz` to `./models`. (available soon)
 
 
 ## Training new models
