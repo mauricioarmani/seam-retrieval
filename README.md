@@ -1,7 +1,4 @@
-# Fast Self-attentive Multimodal Retrieval
-
-**Note**: The original code for our paper "Fast Self-attentive Multimodal Retrieval" is protected. For providing a public version, we forked this code from: https://github.com/fartashf/vsepp/ and adapted it by adding the self-attentive mechanism along with the main proposed methods. 
-
+# Multimodal Retrieval Using a GAN Text Encoder
 
 ## Dependencies
 We recommended to use Anaconda for the following packages.
@@ -29,7 +26,7 @@ wget http://lsa.pucrs.br/jonatas/seam-data/vocab.tar.gz
 ```
 
 We refer to the path of extracted files for `*_precomp.tar.gz` as `$DATA_PATH` and 
-files for `models.tar.gz` (*models are coming up soon*) as `$RUN_PATH`. Extract `vocab.tar.gz` to `./vocab` 
+files for `models.tar.gz` as `$RUN_PATH`. Extract `vocab.tar.gz` to `./vocab` 
 directory.
 
 
@@ -37,29 +34,8 @@ directory.
 Run `train.py`:
 
 ```bash
-python train.py --data_path "$DATA_PATH" --data_name irv2_precomp --logger_name 
-runs/seam-e/irv2_precomp/ 
+python train.py --data_name resnet152_precomp --logger_name runs/model1 --text_encoder gru --max_violation --trade_coeff 0.5 --resume /models/txt_enc.tar --resume2 models/txt_enc_epoch_600.pth
 ```
-
-Arguments used to train pre-trained models:
-
-| Method    | Arguments |
-| :-------: | :-------: |
-| SEAM-E    | `--text_encoder seam-e --att_units 300 --att_hops 30 --att_coef 0.5 --measure order --use_abs` |
-| SEAM-C    | `--text_encoder seam-c  --att_units 300 --att_hops 10 --att_coef 0.5 --measure order --use_abs` |
-| SEAM-G    | `--text_encoder seam-g --att_units 300 --att_hops 30 --att_coef 0.5 --measure order --use_abs` |
-| Order     | `--text_encoder gru  ` |
-
-Available text encoders: 
-* SEAM-E (`seam-e`): Self-attention directly over word-embeddings
-* SEAM-C (`seam-c`): Self-attention over two parallel convolutional layers and over the word inputs. 
-* SEAM-G (`seam-g`): GRU + Self-attention
-
-
-Note that some default arguments in this repository are different from the original one:
-
-`--learning_rate .001 --margin .05`
-
 
 ## Evaluate pre-trained models
 
@@ -71,18 +47,6 @@ evaluation.evalrank("$RUN_PATH/model_best.pth.tar", data_path="$DATA_PATH", spli
 
 To do cross-validation on MSCOCO, pass `fold5=True` with a model trained using 
 `--data_name coco`.
-
-
-## Results
-
-[**Coming up soon**] Results achieved using this repository (COCO-1cv test set): 
-
-| Method    | Features | R@1 | R@10| R@1 | R@10 |
-| :-------: | :----: | :-------: | :-------: | :-------: | :-------: |
-| SEAM-E    | `resnet152_precomp` | |
-| SEAM-C    | `resnet152_precomp` | |
-| SEAM-G    | `resnet152_precomp` | |
-
 
 
 ## Reference

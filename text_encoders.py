@@ -233,7 +233,7 @@ class AttentiveTextEncoder(nn.Module):
 
 # tutorials/08 - Language Model
 # RNN Based Language Model
-class GRUTextEncoder(nn.Module):
+class _GRUTextEncoder(nn.Module):
 
     def __init__(self, vocab_size, word_dim, embed_size, num_layers,
                  use_abs=False, gru_units=1024):
@@ -281,6 +281,70 @@ class GRUTextEncoder(nn.Module):
         if torch.cuda.is_available():
             I = I.cuda()
         out = torch.gather(padded[0], 1, I).squeeze(1)
+
+        if self.fc:
+            out = self.fc(out)
+        
+        # normalization in the joint embedding space
+        outnormed = l2norm(out)
+        # take absolute value, used by order embeddings
+        if self.use_abs:
+            outnormed = torch.abs(outnormed)
+
+        return outnormed
+
+
+class GRUTextEncoder(nn.Module):
+
+    def __init__(self, vocab_size, word_dim, embed_size, num_layers,
+                 gru_units=1024, use_abs=False):
+        super(GRUTextEncoder, self).__init__()
+        self.use_abs = use_abs
+        self.embed_size = embed_size
+        self.gru_units = gru_units
+
+        # word embedding
+        self.embed = nn.Embedding(vocab_size, word_dim)
+
+        # caption embedding
+        self.rnn = nn.GRU(word_dim, gru_units, num_layers, batch_first=True, bidirectional=True)
+        
+        self.fc = None
+        if embed_size != gru_units:
+            self.fc = nn.Linear(gru_units, embed_size)
+
+        self.init_weights()
+
+    def init_weights(self):
+        self.embed.weight.data.uniform_(-0.1, 0.1)
+
+        if self.fc:
+            r = np.sqrt(6.) / np.sqrt(self.fc.in_features +
+                                  self.fc.out_features)
+
+            self.fc.weight.data.uniform_(-r, r)
+            self.fc.bias.data.fill_(0)
+
+    def forward(self, x, lengths):
+        """Handles variable size captions
+        """
+        # Embed word ids to vectors
+        x = self.embed(x)
+        packed = pack_padded_sequence(x, lengths, batch_first=True)
+
+        # Forward propagate RNN
+        out, _ = self.rnn(packed)
+
+        # Reshape *final* output to (batch_size, hidden_size)
+        padded = pad_packed_sequence(out, batch_first=True)
+        I = torch.LongTensor(lengths).view(-1, 1, 1)
+        I = Variable(I.expand(x.size(0), 1, self.gru_units)-1)
+        if torch.cuda.is_available():
+            I = I.cuda()
+
+        seq_len = padded[0].size(1)
+        out = padded[0].view(-1, seq_len, 2, self.gru_units).mean(dim=2)
+        out = torch.gather(out, 1, I).squeeze(1)
 
         if self.fc:
             out = self.fc(out)

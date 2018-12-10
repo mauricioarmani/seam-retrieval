@@ -120,6 +120,7 @@ class EncoderImagePrecomp(nn.Module):
         self.no_imgnorm = no_imgnorm
         self.use_abs = use_abs
         self.fc = False
+        self.img_dim = img_dim
 
         if img_dim != embed_size or True:
             self.fc = nn.Linear(img_dim, embed_size)
@@ -150,6 +151,8 @@ class EncoderImagePrecomp(nn.Module):
         # take the absolute value of embedding (used in order embeddings)
         if self.use_abs:
             features = torch.abs(features)
+
+        # features = features[:, :self.embed_size] + features[:, self.embed_size:] # TXTFT
 
         return features
 
@@ -234,7 +237,149 @@ def Frobenius(mat):
         raise Exception('matrix for computing Frobenius norm should be with 3 dims')
 
 
-class VSE(object):
+class VSE(object): # NOVO
+    """
+    rkiros/uvs model
+    """
+
+    def __init__(self, opt):
+        # tutorials/09 - Image Captioning
+        # Build Models
+        self.opt = opt
+        self.grad_clip = opt.grad_clip
+        self.img_enc = EncoderImage(opt.data_name, 
+                                    opt.img_dim, 
+                                    opt.embed_size,
+                                    opt.finetune, opt.cnn_type,
+                                    use_abs=opt.use_abs,
+                                    no_imgnorm=opt.no_imgnorm)
+        
+        self.txt_enc = get_text_encoder(opt.text_encoder, opt)
+        self.txt_enc_2 = get_text_encoder(opt.text_encoder, opt)
+        
+        if torch.cuda.is_available():
+            self.img_enc.cuda()
+            self.txt_enc.cuda()
+            self.txt_enc_2.cuda()
+            cudnn.benchmark = True
+
+        # Loss and Optimizer
+        self.criterion = ContrastiveLoss(margin=opt.margin,
+                                         measure=opt.measure,
+                                         max_violation=opt.max_violation)
+
+        self.attention = False
+        if opt.text_encoder.startswith('attentive'):
+            self.init_attention()
+
+        params = list(self.txt_enc.parameters()) + list(self.txt_enc_2.parameters())
+        if self.img_enc.fc:        
+            params += list(self.img_enc.fc.parameters())
+        if opt.finetune:
+            params += list(self.img_enc.cnn.parameters())
+        self.params = params
+
+        self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.params), lr=opt.learning_rate)
+
+        self.Eiters = 0
+
+    def init_attention(self):
+        opt = self.opt
+        self.attention = True
+        hops = self.txt_enc.hops
+        self.I = Variable(torch.zeros(opt.batch_size, hops, hops))
+        for i in range(opt.batch_size):
+            for j in range(hops):
+                self.I.data[i][j][j] = 1
+        if torch.cuda.is_available():
+            self.I = self.I.cuda()
+
+    def state_dict(self):
+        state_dict = [self.img_enc.state_dict(), self.txt_enc.state_dict(), 
+                          self.txt_enc_2.state_dict()]
+        return state_dict
+
+    def load_state_dict(self, state_dict, state_dict_2):
+        self.img_enc.load_state_dict(state_dict[0])
+        self.txt_enc.load_state_dict(state_dict[1])
+        self.txt_enc_2.load_state_dict(state_dict_2)
+
+    def train_start(self):
+        """switch to train mode
+        """
+        self.img_enc.train()
+        self.txt_enc.train()
+        self.txt_enc_2.train()
+
+    def val_start(self):
+        """switch to evaluate mode
+        """
+        self.img_enc.eval()
+        self.txt_enc.eval()
+        self.txt_enc_2.eval()
+
+    def forward_emb(self, images, captions, lengths, volatile=False):
+        """Compute the image and caption embeddings
+        """
+        # Set mini-batch dataset
+        images = Variable(images, volatile=volatile)
+        captions = Variable(captions, volatile=volatile)
+        if torch.cuda.is_available():
+            images = images.cuda()
+            captions = captions.cuda()
+
+        # Forward
+        img_emb = self.img_enc(images)
+        cap_emb = self.txt_enc(captions, lengths)
+        cap_emb_2 = self.txt_enc_2(captions, lengths)
+        
+        return img_emb, cap_emb, cap_emb_2
+
+    def forward_loss(self, img_emb, cap_emb, cap_emb_2, **kwargs):
+        """Compute the loss given pairs of image and caption embeddings
+        """
+        loss_1 = self.criterion(img_emb, cap_emb)
+        loss_2 = self.criterion(img_emb, cap_emb_2)
+        self.logger.update('ContrLoss2', loss_2.data[0], img_emb.size(0))
+        loss = loss_1 + loss_2
+            
+        self.logger.update('ContrLoss1', loss_1.data[0], img_emb.size(0))
+        
+        if self.attention:  
+            coef = self.opt.att_coef
+            attention = self.txt_enc.attention_weights
+            attentionT = torch.transpose(attention, 1, 2).contiguous()
+            extra_loss = Frobenius(torch.bmm(attention, attentionT) - self.I[:attention.size(0)])
+            total_loss = loss + coef * extra_loss
+
+            self.logger.update('TotalLoss', total_loss.data[0], img_emb.size(0))
+            self.logger.update('AttLoss', coef * extra_loss.data[0], img_emb.size(0))
+        
+        return loss
+
+    def train_emb(self, images, captions, lengths, ids=None, *args):
+        """One training step given images and captions.
+        """
+        self.Eiters += 1
+        self.logger.update('Iter', self.Eiters)
+        self.logger.update('lr', self.optimizer.param_groups[0]['lr'])
+
+        # compute the embeddings
+        img_emb, cap_emb, cap_emb_2 = self.forward_emb(images, captions, lengths)
+
+        # measure accuracy and record loss
+        self.optimizer.zero_grad()
+        loss = self.forward_loss(img_emb, cap_emb, cap_emb_2)
+
+        # compute gradient and do SGD step
+        loss.backward()
+        if self.grad_clip > 0:
+            clip_grad_norm(self.params, self.grad_clip)
+
+        self.optimizer.step()
+
+
+class _VSE(object): # ORIGINAL
     """
     rkiros/uvs model
     """

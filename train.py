@@ -5,11 +5,13 @@ import torch
 import data
 from vocab import Vocabulary  # NOQA
 from model import VSE
-from evaluation import i2t
+
+from evaluation import i2t 
 from evaluation import t2i
 from evaluation import AverageMeter
 from evaluation import LogCollector
 from evaluation import encode_data
+
 import text_encoders
 import logging
 import tensorboard_logger as tb_logger
@@ -84,6 +86,11 @@ def main():
                         help='Number of attention hops (viewpoints).')
     parser.add_argument('--att_coef', default=0., type=float,
                         help='Influence of Frobenius divergence in the loss function.')
+    
+    parser.add_argument('--resume2', default='', type=str, metavar='PATH',
+                        help='path to latest gan checkpoint (default: none)')
+    parser.add_argument('--trade_coeff', default=0.5, type=float,
+                        help='Trade off coeff for GAN model')
 
     opt = parser.parse_args()
 
@@ -109,16 +116,24 @@ def main():
     print(model.txt_enc)
 
     # optionally resume from a checkpoint
-    if opt.resume:
+    if opt.resume and opt.resume2:
         if os.path.isfile(opt.resume):
-            print("=> loading checkpoint '{}'".format(opt.resume))
+            print("=> loading checkpoint 1 '{}'".format(opt.resume))
             checkpoint = torch.load(opt.resume)
             start_epoch = checkpoint['epoch']
             best_rsum = checkpoint['best_rsum']
-            model.load_state_dict(checkpoint['model'])
+            print("=> loading checkpoint 2 '{}'".format(opt.resume2))
+            checkpoint_2 = torch.load(opt.resume2)
+
+            # para model 2 treinado no seam-retrieval
+            # model.load_state_dict(checkpoint['model'], checkpoint_2['model'])
+
+            # para model 2 treinado na StackGAN
+            model.load_state_dict(checkpoint['model'], checkpoint_2)
+
             # Eiters is used to show logs as the continuation of another
             # training
-            model.Eiters = checkpoint['Eiters']
+            # model.Eiters = checkpoint['Eiters']
             print("=> loaded checkpoint '{}' (epoch {}, best_rsum {})"
                   .format(opt.resume, start_epoch, best_rsum))
             validate(opt, val_loader, model)
@@ -195,18 +210,47 @@ def train(opt, train_loader, model, epoch, val_loader):
             validate(opt, val_loader, model)                        
 
 
-def validate(opt, val_loader, model):
+def validate(opt, val_loader, model): # NOVO
     # compute the encoding for all the validation images and captions
-    img_embs, cap_embs = encode_data(
-        model, val_loader, opt.log_step, logging.info)
+    img_embs, cap_embs, cap_embs_gan = encode_data(opt, model, val_loader, opt.log_step, logging.info)
+
+    # caption retrieval
+    (r1, r5, r10, medr, meanr) = i2t(opt, img_embs, cap_embs, cap_embs_gan, measure=opt.test_measure)
+    logging.info("Image to text: %.1f, %.1f, %.1f, %.1f, %.1f" %
+                 (r1, r5, r10, medr, meanr))
+    # image retrieval
+    (r1i, r5i, r10i, medri, meanr) = t2i(opt, img_embs, cap_embs, cap_embs_gan, measure=opt.test_measure)
+    logging.info("Text to image: %.1f, %.1f, %.1f, %.1f, %.1f" %
+                 (r1i, r5i, r10i, medri, meanr))
+    # sum of recalls to be used for early stopping
+    currscore = r1 + r5 + r10 + r1i + r5i + r10i
+
+    # record metrics in tensorboard
+    tb_logger.log_value('r1', r1, step=model.Eiters)
+    tb_logger.log_value('r5', r5, step=model.Eiters)
+    tb_logger.log_value('r10', r10, step=model.Eiters)
+    tb_logger.log_value('medr', medr, step=model.Eiters)
+    tb_logger.log_value('meanr', meanr, step=model.Eiters)
+    tb_logger.log_value('r1i', r1i, step=model.Eiters)
+    tb_logger.log_value('r5i', r5i, step=model.Eiters)
+    tb_logger.log_value('r10i', r10i, step=model.Eiters)
+    tb_logger.log_value('medri', medri, step=model.Eiters)
+    tb_logger.log_value('meanr', meanr, step=model.Eiters)
+    tb_logger.log_value('rsum', currscore, step=model.Eiters)
+
+    return currscore
+
+
+def _validate(opt, val_loader, model): # ORIGINAL
+    # compute the encoding for all the validation images and captions
+    img_embs, cap_embs = encode_data(model, val_loader, opt.log_step, logging.info)
 
     # caption retrieval
     (r1, r5, r10, medr, meanr) = i2t(img_embs, cap_embs, measure=opt.test_measure)
     logging.info("Image to text: %.1f, %.1f, %.1f, %.1f, %.1f" %
                  (r1, r5, r10, medr, meanr))
     # image retrieval
-    (r1i, r5i, r10i, medri, meanr) = t2i(
-        img_embs, cap_embs, measure=opt.test_measure)
+    (r1i, r5i, r10i, medri, meanr) = t2i(img_embs, cap_embs, measure=opt.test_measure)
     logging.info("Text to image: %.1f, %.1f, %.1f, %.1f, %.1f" %
                  (r1i, r5i, r10i, medri, meanr))
     # sum of recalls to be used for early stopping

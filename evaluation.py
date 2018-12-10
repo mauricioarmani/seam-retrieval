@@ -71,7 +71,7 @@ class LogCollector(object):
             tb_logger.log_value(prefix + k, v.val, step=step)
 
 
-def encode_data(model, data_loader, log_step=10, logging=print):
+def encode_data(opt, model, data_loader, log_step=10, logging=print):
     """Encode all images and captions loadable by `data_loader`
     """
     batch_time = AverageMeter()
@@ -90,20 +90,22 @@ def encode_data(model, data_loader, log_step=10, logging=print):
         model.logger = val_logger
 
         # compute the embeddings
-        img_emb, cap_emb = model.forward_emb(images, captions, lengths,
+        img_emb, cap_emb, cap_emb_2 = model.forward_emb(images, captions, lengths,
                                              volatile=True)
 
         # initialize the numpy arrays given the size of the embeddings
         if img_embs is None:
             img_embs = np.zeros((len(data_loader.dataset), img_emb.size(1)))
             cap_embs = np.zeros((len(data_loader.dataset), cap_emb.size(1)))
+            cap_embs_2 = np.zeros((len(data_loader.dataset), cap_emb_2.size(1)))
 
         # preserve the embeddings by copying from gpu and converting to numpy
         img_embs[ids] = img_emb.data.cpu().numpy().copy()
         cap_embs[ids] = cap_emb.data.cpu().numpy().copy()
-
+        cap_embs_2[ids] = cap_emb_2.data.cpu().numpy().copy()
+            
         # measure accuracy and record loss
-        model.forward_loss(img_emb, cap_emb)
+        model.forward_loss(img_emb, cap_emb, cap_emb_2)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -118,7 +120,8 @@ def encode_data(model, data_loader, log_step=10, logging=print):
                         e_log=str(model.logger)))
         del images, captions
 
-    return img_embs, cap_embs
+    model.train_start()
+    return img_embs, cap_embs, cap_embs_2
 
 
 def evalrank(model_path, data_path=None, split='dev', fold5=False, test_measure=None, log_step=10000):
@@ -143,22 +146,22 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False, test_measure=
         test_measure = opt.test_measure
 
     # load model state
-    model.load_state_dict(checkpoint['model'])
+    model.load_state_dict(checkpoint['model'][:2], checkpoint['model'][2])
 
     print('Loading dataset')
     data_loader = get_test_loader(split, opt.data_name, tokenizer, opt.crop_size,
                                   opt.batch_size, opt.workers, opt)
 
     print('Computing results...')
-    img_embs, cap_embs = encode_data(model, data_loader, log_step=log_step)
+    img_embs, cap_embs, cap_embs_2 = encode_data(opt, model, data_loader, log_step=log_step)
+
     print('Images: %d, Captions: %d' %
           (img_embs.shape[0] / 5, cap_embs.shape[0]))
 
     if not fold5:
         # no cross-validation, full evaluation
-        r, rt = i2t(img_embs, cap_embs, measure=test_measure, return_ranks=True)
-        ri, rti = t2i(img_embs, cap_embs,
-                      measure=test_measure, return_ranks=True)
+        r, rt = i2t(opt, img_embs, cap_embs, cap_embs_2, measure=test_measure, return_ranks=True)
+        ri, rti = t2i(opt, img_embs, cap_embs, cap_embs_2, measure=test_measure, return_ranks=True)
         ar = (r[0] + r[1] + r[2]) / 3
         ari = (ri[0] + ri[1] + ri[2]) / 3
         rsum = r[0] + r[1] + r[2] + ri[0] + ri[1] + ri[2]
@@ -204,7 +207,7 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False, test_measure=
     return results, mean_metrics
 
 
-def i2t(images, captions, npts=None, measure='cosine', return_ranks=False):
+def i2t(opt, images, captions, captions_2, npts=None, measure='cosine', return_ranks=False):
     """
     Images->Text (Image Annotation)
     Images: (5N, K) matrix of images
@@ -232,7 +235,11 @@ def i2t(images, captions, npts=None, measure='cosine', return_ranks=False):
                 d2 = d2.cpu().numpy()
             d = d2[index % bs]
         else:
-            d = numpy.dot(im, captions.T).flatten()
+            d_ret = numpy.dot(im, captions.T).flatten()
+            d_ret2 = numpy.dot(im, captions_2.T).flatten()
+            gc = opt.trade_coeff
+            d = gc*d_ret2 + (1 - gc)*d_ret
+
         inds = numpy.argsort(d)[::-1]
         index_list.append(inds[0])
 
@@ -257,7 +264,7 @@ def i2t(images, captions, npts=None, measure='cosine', return_ranks=False):
         return (r1, r5, r10, medr, meanr)
 
 
-def t2i(images, captions, npts=None, measure='cosine', return_ranks=False):
+def t2i(opt, images, captions, captions_2, npts=None, measure='cosine', return_ranks=False):
     """
     Text->Images (Image Search)
     Images: (5N, K) matrix of images
@@ -273,6 +280,7 @@ def t2i(images, captions, npts=None, measure='cosine', return_ranks=False):
 
         # Get query captions
         queries = captions[5 * index:5 * index + 5]
+        queries_2 = captions_2[5 * index:5 * index + 5]
 
         # Compute scores
         if measure == 'order':
@@ -286,7 +294,10 @@ def t2i(images, captions, npts=None, measure='cosine', return_ranks=False):
 
             d = d2[:, (5 * index) % bs:(5 * index) % bs + 5].T
         else:
-            d = numpy.dot(queries, ims.T)
+            d_ret = numpy.dot(queries, ims.T)
+            d_ret2 = numpy.dot(queries_2, ims.T)
+            gc = opt.trade_coeff
+            d = gc*d_ret2 + (1 - gc)*d_ret
         inds = numpy.zeros(d.shape)
         for i in range(len(inds)):
             inds[i] = numpy.argsort(d[i])[::-1]
