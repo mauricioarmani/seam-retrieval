@@ -89,7 +89,7 @@ def main():
     
     parser.add_argument('--resume2', default='', type=str, metavar='PATH',
                         help='path to latest gan checkpoint (default: none)')
-    parser.add_argument('--trade_coeff', default=0.5, type=float,
+    parser.add_argument('--gan_coeff', default=0.5, type=float,
                         help='Trade off coeff for GAN model')
 
     opt = parser.parse_args()

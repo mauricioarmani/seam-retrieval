@@ -32,7 +32,7 @@ Extract `models.tar.gz` to `./models`. (available soon)
 Run `train.py`:
 
 ```bash
-python train.py --data_name resnet152_precomp --logger_name runs/model1 --text_encoder gru --max_violation --trade_coeff 0.5 --resume /models/txt_enc.tar --resume2 models/txt_enc_epoch_600.pth
+python train.py --data_name resnet152_precomp --logger_name runs/model1 --text_encoder gru --max_violation --gan_coeff 0.5 --resume /models/txt_enc.tar --resume2 models/txt_enc_epoch_600.pth
 ```
 
 ## Evaluate pre-trained models

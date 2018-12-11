@@ -238,7 +238,7 @@ def i2t(opt, images, captions, captions_2, npts=None, measure='cosine', return_r
         else:
             d_ret = numpy.dot(im, captions.T).flatten()
             d_ret2 = numpy.dot(im, captions_2.T).flatten()
-            gc = opt.trade_coeff
+            gc = opt.gan_coeff
             d = gc*d_ret2 + (1 - gc)*d_ret
 
         inds = numpy.argsort(d)[::-1]
@@ -297,7 +297,7 @@ def t2i(opt, images, captions, captions_2, npts=None, measure='cosine', return_r
         else:
             d_ret = numpy.dot(queries, ims.T)
             d_ret2 = numpy.dot(queries_2, ims.T)
-            gc = opt.trade_coeff
+            gc = opt.gan_coeff
             d = gc*d_ret2 + (1 - gc)*d_ret
         inds = numpy.zeros(d.shape)
         for i in range(len(inds)):
