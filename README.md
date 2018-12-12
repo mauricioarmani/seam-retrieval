@@ -25,14 +25,13 @@ wget http://lsa.pucrs.br/jonatas/seam-data/resnet152_precomp.tar.gz
 wget http://lsa.pucrs.br/jonatas/seam-data/vocab.tar.gz
 ```
 
-Extract `models.tar.gz` to `./models`. (available soon)
-
+** Models not avaiable yet.
 
 ## Training new models
 Run `train.py`:
 
 ```bash
-python train.py --data_name resnet152_precomp --logger_name runs/model1 --text_encoder gru --max_violation --gan_coeff 0.5 --resume /models/txt_enc.tar --resume2 models/txt_enc_epoch_600.pth
+python train.py --data_name resnet152_precomp --logger_name runs/model --text_encoder gru --max_violation --lr_update 10 --learning_rate 1e-4 --resume /models/txt_enc.tar --resume2 models/txt_enc_epoch_600.pth
 ```
 
 ## Evaluate pre-trained models
@@ -40,7 +39,7 @@ python train.py --data_name resnet152_precomp --logger_name runs/model1 --text_e
 ```python
 from vocab import Vocabulary
 import evaluation
-evaluation.evalrank("$RUN_PATH/model_best.pth.tar", data_path="$DATA_PATH", split="test")'
+evaluation.evalrank("$RUN_PATH/model_best.pth.tar", data_path="$DATA_PATH", split="test", fold5=True)'
 ```
 
 To do cross-validation on MSCOCO, pass `fold5=True` with a model trained using 

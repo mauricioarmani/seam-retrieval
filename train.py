@@ -89,8 +89,8 @@ def main():
     
     parser.add_argument('--resume2', default='', type=str, metavar='PATH',
                         help='path to latest gan checkpoint (default: none)')
-    parser.add_argument('--gan_coeff', default=0.5, type=float,
-                        help='Trade off coeff for GAN model')
+    # parser.add_argument('--gan_coeff', default=0.5, type=float,
+                        # help='Trade off coeff for GAN model')
 
     opt = parser.parse_args()
 
@@ -125,11 +125,8 @@ def main():
             print("=> loading checkpoint 2 '{}'".format(opt.resume2))
             checkpoint_2 = torch.load(opt.resume2)
 
-            # para model 2 treinado no seam-retrieval
-            # model.load_state_dict(checkpoint['model'], checkpoint_2['model'])
-
-            # para model 2 treinado na StackGAN
-            model.load_state_dict(checkpoint['model'], checkpoint_2)
+            # model.load_state_dict(checkpoint['model'], checkpoint_2['model']) # se resume2 for .pth.tar
+            model.load_state_dict(checkpoint['model'], checkpoint_2) # se resume2 for .pth
 
             # Eiters is used to show logs as the continuation of another
             # training
@@ -173,6 +170,7 @@ def train(opt, train_loader, model, epoch, val_loader):
     model.train_start()
 
     end = time.time()
+    model.epoch = epoch
     for i, train_data in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -210,7 +208,7 @@ def train(opt, train_loader, model, epoch, val_loader):
             validate(opt, val_loader, model)                        
 
 
-def validate(opt, val_loader, model): # NOVO
+def _validate(opt, val_loader, model): # NOVO
     # compute the encoding for all the validation images and captions
     img_embs, cap_embs, cap_embs_gan = encode_data(opt, model, val_loader, opt.log_step, logging.info)
 
@@ -241,7 +239,7 @@ def validate(opt, val_loader, model): # NOVO
     return currscore
 
 
-def _validate(opt, val_loader, model): # ORIGINAL
+def validate(opt, val_loader, model): # ORIGINAL
     # compute the encoding for all the validation images and captions
     img_embs, cap_embs = encode_data(model, val_loader, opt.log_step, logging.info)
 
